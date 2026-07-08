@@ -86,8 +86,36 @@ def _iso_duration_to_seconds(dur):
 
 
 # ---------------------------------------------------------------------------
-# YouTube — Data API v3 (API key only; public statistics)
+# YouTube — Data API v3 (API key; public statistics)
+#           + Analytics API (OAuth; real audience retention)
 # ---------------------------------------------------------------------------
+
+def _youtube_access_token():
+    """Exchange the stored OAuth refresh token for a short-lived access token."""
+    cid = os.environ.get("YOUTUBE_OAUTH_CLIENT_ID")
+    secret = os.environ.get("YOUTUBE_OAUTH_CLIENT_SECRET")
+    refresh = os.environ.get("YOUTUBE_OAUTH_REFRESH_TOKEN")
+    if not (cid and secret and refresh):
+        return None
+    r = requests.post("https://oauth2.googleapis.com/token", data={
+        "client_id": cid, "client_secret": secret,
+        "refresh_token": refresh, "grant_type": "refresh_token"}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json().get("access_token")
+
+
+def _youtube_retention(access_token):
+    """Per-video average-view-percentage from the Analytics API → {videoId: pct}."""
+    from datetime import date, timedelta
+    start = os.environ.get("YOUTUBE_ANALYTICS_START") or (date.today() - timedelta(days=730)).isoformat()
+    r = requests.get("https://youtubeanalytics.googleapis.com/v2/reports", params={
+        "ids": "channel==MINE", "startDate": start, "endDate": date.today().isoformat(),
+        "metrics": "averageViewPercentage", "dimensions": "video",
+        "sort": "-averageViewPercentage", "maxResults": 200},
+        headers={"Authorization": f"Bearer {access_token}"}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return {row[0]: round(float(row[1]), 1) for row in r.json().get("rows", [])}
+
 
 def sync_youtube(con, channel_id):
     key = os.environ.get("YOUTUBE_API_KEY")
@@ -106,6 +134,16 @@ def sync_youtube(con, channel_id):
     if not items:
         return {"platform": "youtube", "status": "error", "reason": "channel not found"}
     uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+    # 1b) real audience retention (optional; needs OAuth Analytics access)
+    retention_map, retention_note = {}, "not configured"
+    try:
+        token = _youtube_access_token()
+        if token:
+            retention_map = _youtube_retention(token)
+            retention_note = "youtube analytics"
+    except Exception as e:
+        retention_note = f"unavailable ({e})"
 
     # 2) recent video ids from that playlist
     video_ids, page = [], None
@@ -140,10 +178,12 @@ def sync_youtube(con, channel_id):
                 published_at=sn.get("publishedAt", ""),
                 views=st.get("viewCount", 0), likes=st.get("likeCount", 0),
                 comments=st.get("commentCount", 0),
+                retention=retention_map.get(v["id"], 0),
                 url=f"https://youtu.be/{v['id']}")
             count += 1
     con.commit()
-    return {"platform": "youtube", "status": "ok", "synced": count}
+    return {"platform": "youtube", "status": "ok", "synced": count,
+            "retention": retention_note}
 
 
 # ---------------------------------------------------------------------------

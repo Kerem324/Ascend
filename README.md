@@ -57,9 +57,23 @@ Re-syncing updates existing posts in place (deduped by the platform's post id).
 | **Instagram** | `IG_ACCESS_TOKEN`, `IG_USER_ID` (Graph API, Business/Creator acct) | plays/reach, likes, comments, saves, shares |
 | **TikTok** | `TIKTOK_ACCESS_TOKEN` (Display API OAuth token) | views, likes, comments, shares |
 
-Retention (avg-view-%) comes from each platform's *analytics* API (OAuth) and is
-left at 0 when the configured endpoint doesn't expose it — edit it in per post.
 See `.env.example` for where to get each credential.
+
+**Real retention (YouTube).** Average-view-% comes from the YouTube *Analytics*
+API, which needs an OAuth token (not just the API key). Set it up once:
+
+```bash
+# OAuth client type "TVs and Limited Input devices" in Google Cloud Console
+export YOUTUBE_OAUTH_CLIENT_ID=... YOUTUBE_OAUTH_CLIENT_SECRET=...
+python auth_youtube.py          # opens a device-flow URL + code
+# paste the printed YOUTUBE_OAUTH_REFRESH_TOKEN into .env
+```
+
+After that, every sync fills in true retention per video (the status shows
+`retention ✓`). It's fully optional — leave the OAuth vars blank and retention
+stays 0. Instagram exposes only average watch *time* (not a %) and TikTok's
+public Display API exposes no retention at all, so those stay 0 and can be
+edited in per post.
 
 ## Data model
 

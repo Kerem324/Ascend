@@ -318,7 +318,9 @@ syncBtn.addEventListener("click", async () => {
       const ok = d.results.filter((r) => r.status === "ok");
       const total = ok.reduce((n, r) => n + (r.synced || 0), 0);
       if (ok.length) {
-        syncStatus.textContent = `✓ ${total} posts from ${ok.map((r) => r.platform).join(", ")}`;
+        const yt = ok.find((r) => r.retention === "youtube analytics");
+        syncStatus.textContent = `✓ ${total} posts from ${ok.map((r) => r.platform).join(", ")}`
+          + (yt ? " · retention ✓" : "");
         load();
       } else {
         syncStatus.innerHTML = "No platforms connected. See <b>.env.example</b>.";
