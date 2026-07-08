@@ -1,9 +1,2 @@
 flask
 gunicorn
-psycopg2-binary
-stripe
-paypalrestsdk
-sqlalchemy
-flask_sqlalchemy
-flask_login
-python-dotenv
