@@ -74,10 +74,19 @@ def init_db():
             shares       INTEGER NOT NULL DEFAULT 0,
             saves        INTEGER NOT NULL DEFAULT 0,
             retention    REAL NOT NULL DEFAULT 0,
-            url          TEXT
+            url          TEXT,
+            external_id  TEXT
         );
         """
     )
+    # Migration: add external_id to pre-existing databases.
+    cols = [r[1] for r in con.execute("PRAGMA table_info(posts)").fetchall()]
+    if "external_id" not in cols:
+        con.execute("ALTER TABLE posts ADD COLUMN external_id TEXT")
+    # Dedupe key for live-synced posts. SQLite treats NULLs as distinct, so the
+    # demo/manual rows (external_id NULL) are never collapsed by this index.
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_posts_ext "
+                "ON posts(channel_id, platform, external_id)")
     con.commit()
     con.close()
 
@@ -418,6 +427,17 @@ def api_add_post():
     except (KeyError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
+
+
+@app.route("/api/sync", methods=["POST"])
+def api_sync():
+    """Pull live numbers from any platform whose credentials are configured."""
+    import ingest
+    try:
+        results = ingest.sync_all(DB_PATH)
+    except Exception as e:  # never 500 the UI over a flaky third-party API
+        return jsonify({"error": str(e), "results": []}), 200
+    return jsonify({"results": results})
 
 
 init_db()

@@ -49,6 +49,8 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .btn-ghost { background: none; border: 1px solid var(--border); color: var(--ink-2);
   padding: 9px; border-radius: 9px; cursor: pointer; font-family: inherit; font-size: 13px; }
 .btn-ghost:hover { color: var(--ink); border-color: var(--muted); }
+.btn-ghost:disabled { opacity: .5; cursor: default; }
+.sync-status { margin-top: 2px; line-height: 1.4; min-height: 1em; }
 
 .main { padding: 24px 28px 60px; max-width: 1200px; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; gap: 16px; }

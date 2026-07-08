@@ -305,5 +305,31 @@ document.getElementById("addForm").addEventListener("submit", async (e) => {
   load();
 });
 
+/* ---------- Live sync ---------- */
+const syncBtn = document.getElementById("syncBtn");
+const syncStatus = document.getElementById("syncStatus");
+syncBtn.addEventListener("click", async () => {
+  syncBtn.disabled = true;
+  syncStatus.textContent = "Syncing…";
+  try {
+    const d = await (await fetch("/api/sync", { method: "POST" })).json();
+    if (d.error) { syncStatus.textContent = "⚠ " + d.error; }
+    else {
+      const ok = d.results.filter((r) => r.status === "ok");
+      const total = ok.reduce((n, r) => n + (r.synced || 0), 0);
+      if (ok.length) {
+        syncStatus.textContent = `✓ ${total} posts from ${ok.map((r) => r.platform).join(", ")}`;
+        load();
+      } else {
+        syncStatus.innerHTML = "No platforms connected. See <b>.env.example</b>.";
+      }
+    }
+  } catch (e) {
+    syncStatus.textContent = "⚠ sync failed";
+  }
+  syncBtn.disabled = false;
+  setTimeout(() => { syncStatus.textContent = ""; }, 9000);
+});
+
 /* ---------- Boot ---------- */
 load();
