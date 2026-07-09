@@ -45,6 +45,16 @@ def _own_channel_id(con):
     return row["id"] if row else None
 
 
+def _channel_field(con, channel_id, field):
+    row = con.execute(f"SELECT {field} FROM channels WHERE id=?", (channel_id,)).fetchone()
+    return row[field] if row and row[field] else None
+
+
+def set_meta(con, key, value):
+    con.execute("INSERT INTO meta(key, value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+
 def upsert_post(con, channel_id, platform, external_id, **f):
     """Insert or update one post, keyed on (channel_id, platform, external_id)."""
     con.execute(
@@ -117,35 +127,19 @@ def _youtube_retention(access_token):
     return {row[0]: round(float(row[1]), 1) for row in r.json().get("rows", [])}
 
 
-def sync_youtube(con, channel_id):
-    key = os.environ.get("YOUTUBE_API_KEY")
-    yt_channel = os.environ.get("YOUTUBE_CHANNEL_ID")
-    if not (key and yt_channel):
-        return {"platform": "youtube", "status": "skipped",
-                "reason": "set YOUTUBE_API_KEY and YOUTUBE_CHANNEL_ID"}
-    limit = int(os.environ.get("YOUTUBE_MAX", "30"))
+def _youtube_videos_for(key, yt_channel_id, limit):
+    """Fetch recent public videos + stats for ANY channel id. Returns a list of
+    normalized post dicts, or None if the channel isn't found. Works for your own
+    channel and for competitors alike (public statistics only)."""
     base = "https://www.googleapis.com/youtube/v3"
-
-    # 1) uploads playlist for the channel
     r = requests.get(f"{base}/channels", params={
-        "part": "contentDetails", "id": yt_channel, "key": key}, timeout=TIMEOUT)
+        "part": "contentDetails", "id": yt_channel_id, "key": key}, timeout=TIMEOUT)
     r.raise_for_status()
     items = r.json().get("items", [])
     if not items:
-        return {"platform": "youtube", "status": "error", "reason": "channel not found"}
+        return None
     uploads = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-    # 1b) real audience retention (optional; needs OAuth Analytics access)
-    retention_map, retention_note = {}, "not configured"
-    try:
-        token = _youtube_access_token()
-        if token:
-            retention_map = _youtube_retention(token)
-            retention_note = "youtube analytics"
-    except Exception as e:
-        retention_note = f"unavailable ({e})"
-
-    # 2) recent video ids from that playlist
     video_ids, page = [], None
     while len(video_ids) < limit:
         r = requests.get(f"{base}/playlistItems", params={
@@ -159,8 +153,7 @@ def sync_youtube(con, channel_id):
         if not page:
             break
 
-    # 3) statistics + snippet + duration, in batches of 50
-    count = 0
+    out = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i + 50]
         r = requests.get(f"{base}/videos", params={
@@ -170,19 +163,45 @@ def sync_youtube(con, channel_id):
         for v in r.json().get("items", []):
             sn, st = v.get("snippet", {}), v.get("statistics", {})
             secs = _iso_duration_to_seconds(v.get("contentDetails", {}).get("duration"))
-            upsert_post(
-                con, channel_id, "youtube", v["id"],
-                type="short" if secs and secs <= 60 else "video",
-                title=sn.get("title", "Untitled"),
-                hook=_hook_from(sn.get("description")) or sn.get("title", ""),
-                published_at=sn.get("publishedAt", ""),
-                views=st.get("viewCount", 0), likes=st.get("likeCount", 0),
-                comments=st.get("commentCount", 0),
-                retention=retention_map.get(v["id"], 0),
-                url=f"https://youtu.be/{v['id']}")
-            count += 1
+            out.append({
+                "id": v["id"],
+                "type": "short" if secs and secs <= 60 else "video",
+                "title": sn.get("title", "Untitled"),
+                "hook": _hook_from(sn.get("description")) or sn.get("title", ""),
+                "published_at": sn.get("publishedAt", ""),
+                "views": st.get("viewCount", 0), "likes": st.get("likeCount", 0),
+                "comments": st.get("commentCount", 0),
+                "url": f"https://youtu.be/{v['id']}"})
+    return out
+
+
+def sync_youtube(con, channel_id):
+    key = os.environ.get("YOUTUBE_API_KEY")
+    yt_channel = os.environ.get("YOUTUBE_CHANNEL_ID") or _channel_field(con, channel_id, "yt_channel_id")
+    if not (key and yt_channel):
+        return {"platform": "youtube", "status": "skipped",
+                "reason": "set YOUTUBE_API_KEY and YOUTUBE_CHANNEL_ID"}
+    limit = int(os.environ.get("YOUTUBE_MAX", "30"))
+
+    # real audience retention (optional; needs OAuth Analytics access)
+    retention_map, retention_note = {}, "not configured"
+    try:
+        token = _youtube_access_token()
+        if token:
+            retention_map = _youtube_retention(token)
+            retention_note = "youtube analytics"
+    except Exception as e:
+        retention_note = f"unavailable ({e})"
+
+    videos = _youtube_videos_for(key, yt_channel, limit)
+    if videos is None:
+        return {"platform": "youtube", "status": "error", "reason": "channel not found"}
+    for vd in videos:
+        upsert_post(con, channel_id, "youtube", vd["id"],
+                    retention=retention_map.get(vd["id"], 0),
+                    **{k: vd[k] for k in vd if k != "id"})
     con.commit()
-    return {"platform": "youtube", "status": "ok", "synced": count,
+    return {"platform": "youtube", "status": "ok", "synced": len(videos),
             "retention": retention_note}
 
 
@@ -273,39 +292,147 @@ def sync_tiktok(con, channel_id):
 
 
 # ---------------------------------------------------------------------------
+# Competitors — public data only (no private analytics of other creators)
+# ---------------------------------------------------------------------------
+
+def sync_competitor_youtube(con, comp):
+    """A competitor's recent public videos via the Data API key + their channel id."""
+    key = os.environ.get("YOUTUBE_API_KEY")
+    if not key or not comp.get("yt_channel_id"):
+        return None
+    limit = int(os.environ.get("COMPETITOR_MAX", "20"))
+    videos = _youtube_videos_for(key, comp["yt_channel_id"], limit)
+    if videos is None:
+        return {"platform": "youtube", "status": "error", "reason": "channel not found"}
+    for vd in videos:
+        upsert_post(con, comp["id"], "youtube", vd["id"],
+                    **{k: vd[k] for k in vd if k != "id"})
+    return {"platform": "youtube", "status": "ok", "synced": len(videos)}
+
+
+def sync_competitor_instagram(con, comp):
+    """A competitor's public posts via Instagram Business Discovery (uses YOUR token).
+    Returns public like/comment counts + follower count; views aren't exposed for
+    other accounts, so they stay 0."""
+    token = os.environ.get("IG_ACCESS_TOKEN")
+    ig_user = os.environ.get("IG_USER_ID")
+    if not (token and ig_user and comp.get("ig_username")):
+        return None
+    limit = int(os.environ.get("COMPETITOR_MAX", "20"))
+    ver = os.environ.get("IG_API_VERSION", "v21.0")
+    fields = (f"business_discovery.username({comp['ig_username']})"
+              f"{{followers_count,media.limit({limit})"
+              f"{{id,caption,media_type,media_product_type,permalink,timestamp,"
+              f"like_count,comments_count}}}}")
+    r = requests.get(f"https://graph.facebook.com/{ver}/{ig_user}",
+                     params={"fields": fields, "access_token": token}, timeout=TIMEOUT)
+    r.raise_for_status()
+    bd = r.json().get("business_discovery", {})
+    if bd.get("followers_count"):
+        con.execute("UPDATE channels SET followers=? WHERE id=?",
+                    (bd["followers_count"], comp["id"]))
+    count = 0
+    for m in bd.get("media", {}).get("data", []):
+        product = (m.get("media_product_type") or m.get("media_type") or "").lower()
+        upsert_post(
+            con, comp["id"], "instagram", m["id"],
+            type="reel" if "reel" in product or product == "video" else "post",
+            title=(m.get("caption") or "Instagram post")[:80],
+            hook=_hook_from(m.get("caption")),
+            published_at=m.get("timestamp", ""),
+            views=0, likes=m.get("like_count", 0), comments=m.get("comments_count", 0),
+            url=m.get("permalink", ""))
+        count += 1
+    return {"platform": "instagram", "status": "ok", "synced": count}
+
+
+COMPETITOR_SYNCERS = [sync_competitor_youtube, sync_competitor_instagram]
+
+
+def sync_competitors(con):
+    comps = [dict(r) for r in con.execute("SELECT * FROM channels WHERE is_own=0").fetchall()]
+    results = []
+    for comp in comps:
+        for fn in COMPETITOR_SYNCERS:
+            try:
+                res = fn(con, comp)
+            except Exception as e:
+                res = {"platform": fn.__name__.split("_")[-1], "status": "error", "reason": str(e)}
+            if res:
+                results.append({"channel": comp["name"], **res})
+    con.commit()
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
 SYNCERS = [sync_youtube, sync_instagram, sync_tiktok]
 
 
+def _default_db():
+    return os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "data.db"))
+
+
+def _sync_own(con):
+    cid = _own_channel_id(con)
+    if cid is None:
+        return [{"platform": "all", "status": "error", "reason": "no own channel in DB"}]
+    out = []
+    for fn in SYNCERS:
+        try:
+            out.append(fn(con, cid))
+        except Exception as e:
+            out.append({"platform": fn.__name__.replace("sync_", ""),
+                        "status": "error", "reason": str(e)})
+    return out
+
+
 def sync_all(db_path=None):
-    db_path = db_path or os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "data.db"))
+    """Sync your OWN channels only. Kept for scripting; sync_everything is the full run."""
     if requests is None:
         return [{"platform": "all", "status": "error",
                  "reason": "the 'requests' package is required for live sync"}]
-    con = _connect(db_path)
+    con = _connect(db_path or _default_db())
     try:
-        channel_id = _own_channel_id(con)
-        if channel_id is None:
-            return [{"platform": "all", "status": "error", "reason": "no own channel in DB"}]
-        results = []
-        for fn in SYNCERS:
-            try:
-                results.append(fn(con, channel_id))
-            except Exception as e:
-                results.append({"platform": fn.__name__.replace("sync_", ""),
-                                "status": "error", "reason": str(e)})
-        return results
+        return _sync_own(con)
     finally:
         con.close()
 
 
-if __name__ == "__main__":
-    for res in sync_all():
-        line = f"  {res['platform']:<10} {res['status']}"
+def sync_everything(db_path=None):
+    """Full run: your own channels + all tracked competitors. Records last_sync."""
+    if requests is None:
+        return {"error": "the 'requests' package is required for live sync",
+                "own": [], "competitors": []}
+    con = _connect(db_path or _default_db())
+    try:
+        own = _sync_own(con)
+        competitors = sync_competitors(con)
+        set_meta(con, "last_sync", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        con.commit()
+        return {"own": own, "competitors": competitors}
+    finally:
+        con.close()
+
+
+def _print(section, rows):
+    print(section)
+    for res in rows:
+        who = (res.get("channel") + " / ") if res.get("channel") else ""
+        line = f"  {who}{res['platform']:<10} {res['status']}"
         if res.get("synced") is not None:
             line += f"  ({res['synced']} posts)"
         if res.get("reason"):
             line += f"  — {res['reason']}"
         print(line)
+
+
+if __name__ == "__main__":
+    data = sync_everything()
+    if data.get("error"):
+        print(data["error"])
+    else:
+        _print("Own channels:", data["own"])
+        _print("Competitors:", data["competitors"] or [{"platform": "-", "status": "none configured"}])

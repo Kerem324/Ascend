@@ -1,0 +1,27 @@
+{
+  "_comment": "Copy to channels.json to run in LIVE mode: your real brand + the competitors you track. When channels.json exists the app skips the demo data and fills everything via sync. Delete data.db after editing so it re-seeds. Leave a platform id blank to skip that platform for that channel.",
+
+  "own": {
+    "name": "Your Brand",
+    "handle": "@yourbrand",
+    "niche": "content creation",
+    "yt_channel_id": "UCxxxxxxxxxxxxxxxxxxxxxx",
+    "ig_username": "yourbrand",
+    "tiktok_username": "yourbrand"
+  },
+
+  "competitors": [
+    {
+      "name": "Mia Makes",
+      "handle": "@miamakes",
+      "yt_channel_id": "UCxxxxxxxxxxxxxxxxxxxxxx",
+      "ig_username": "miamakes"
+    },
+    {
+      "name": "GrowthGuy",
+      "handle": "@growthguy",
+      "yt_channel_id": "UCxxxxxxxxxxxxxxxxxxxxxx",
+      "ig_username": "growthguy"
+    }
+  ]
+}

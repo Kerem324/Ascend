@@ -52,12 +52,20 @@ def init_db():
     con.executescript(
         """
         CREATE TABLE IF NOT EXISTS channels (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            name      TEXT NOT NULL,
-            handle    TEXT,
-            is_own    INTEGER NOT NULL DEFAULT 0,
-            followers INTEGER NOT NULL DEFAULT 0,
-            niche     TEXT
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            handle          TEXT,
+            is_own          INTEGER NOT NULL DEFAULT 0,
+            followers       INTEGER NOT NULL DEFAULT 0,
+            niche           TEXT,
+            yt_channel_id   TEXT,
+            ig_username     TEXT,
+            tiktok_username TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
         );
 
         CREATE TABLE IF NOT EXISTS posts (
@@ -79,10 +87,14 @@ def init_db():
         );
         """
     )
-    # Migration: add external_id to pre-existing databases.
-    cols = [r[1] for r in con.execute("PRAGMA table_info(posts)").fetchall()]
-    if "external_id" not in cols:
+    # Migration: add newer columns to pre-existing databases.
+    pcols = [r[1] for r in con.execute("PRAGMA table_info(posts)").fetchall()]
+    if "external_id" not in pcols:
         con.execute("ALTER TABLE posts ADD COLUMN external_id TEXT")
+    ccols = [r[1] for r in con.execute("PRAGMA table_info(channels)").fetchall()]
+    for col in ("yt_channel_id", "ig_username", "tiktok_username"):
+        if col not in ccols:
+            con.execute(f"ALTER TABLE channels ADD COLUMN {col} TEXT")
     # Dedupe key for live-synced posts. SQLite treats NULLs as distinct, so the
     # demo/manual rows (external_id NULL) are never collapsed by this index.
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_posts_ext "
@@ -175,21 +187,36 @@ def _make_posts(rng, channel_platforms, base_reach, count_range, days=40):
     return posts
 
 
-def seed_db():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    if con.execute("SELECT COUNT(*) FROM channels").fetchone()[0] > 0:
-        con.close()
-        return
+CONFIG_PATH = os.environ.get("CHANNELS_CONFIG", os.path.join(os.path.dirname(__file__), "channels.json"))
 
+
+def _insert_channel(con, info, is_own):
+    cur = con.execute(
+        """INSERT INTO channels (name, handle, is_own, followers, niche,
+                                 yt_channel_id, ig_username, tiktok_username)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (info["name"], info.get("handle", ""), is_own, int(info.get("followers", 0)),
+         info.get("niche", ""), info.get("yt_channel_id", ""),
+         info.get("ig_username", ""), info.get("tiktok_username", "")),
+    )
+    return cur.lastrowid
+
+
+def seed_from_config(con, cfg):
+    """Real mode: create channels from channels.json. No fake posts — data
+    arrives via live sync."""
+    if cfg.get("own"):
+        _insert_channel(con, cfg["own"], 1)
+    for comp in cfg.get("competitors", []):
+        _insert_channel(con, comp, 0)
+
+
+def seed_demo(con):
+    """Demo mode: channels + realistic generated posts, deterministic seed."""
     rng = random.Random(42)
 
     def add_channel(info, is_own, platforms, base_reach, count_range):
-        cur = con.execute(
-            "INSERT INTO channels (name, handle, is_own, followers, niche) VALUES (?,?,?,?,?)",
-            (info["name"], info["handle"], is_own, info["followers"], info["niche"]),
-        )
-        cid = cur.lastrowid
+        cid = _insert_channel(con, info, is_own)
         for p in _make_posts(rng, platforms, base_reach, count_range):
             con.execute(
                 """INSERT INTO posts (channel_id, platform, type, title, hook, published_at,
@@ -204,6 +231,20 @@ def seed_db():
     for comp in COMPETITORS:
         reach = int(comp["followers"] * rng.uniform(0.12, 0.28))
         add_channel(comp, 0, ["youtube", "instagram", "tiktok"], base_reach=reach, count_range=(12, 18))
+
+
+def seed_db():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    if con.execute("SELECT COUNT(*) FROM channels").fetchone()[0] > 0:
+        con.close()
+        return
+
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as fh:
+            seed_from_config(con, json.load(fh))
+    else:
+        seed_demo(con)
 
     con.commit()
     con.close()
@@ -431,17 +472,51 @@ def api_add_post():
 
 @app.route("/api/sync", methods=["POST"])
 def api_sync():
-    """Pull live numbers from any platform whose credentials are configured."""
+    """Pull live numbers for your own channels AND tracked competitors, from
+    any platform whose credentials are configured."""
     import ingest
     try:
-        results = ingest.sync_all(DB_PATH)
+        results = ingest.sync_everything(DB_PATH)
     except Exception as e:  # never 500 the UI over a flaky third-party API
-        return jsonify({"error": str(e), "results": []}), 200
-    return jsonify({"results": results})
+        return jsonify({"error": str(e), "own": [], "competitors": []}), 200
+    return jsonify(results)
+
+
+@app.route("/api/meta")
+def api_meta():
+    db = get_db()
+    row = db.execute("SELECT value FROM meta WHERE key='last_sync'").fetchone()
+    return jsonify({
+        "lastSync": row["value"] if row else None,
+        "autoSyncMinutes": int(os.environ.get("SYNC_INTERVAL_MINUTES", "0") or 0),
+    })
+
+
+def start_autosync():
+    """Background scheduler — runs a full sync every SYNC_INTERVAL_MINUTES."""
+    minutes = int(os.environ.get("SYNC_INTERVAL_MINUTES", "0") or 0)
+    if minutes <= 0:
+        return
+    import threading
+    import time
+    import ingest
+
+    def loop():
+        while True:
+            time.sleep(minutes * 60)
+            try:
+                ingest.sync_everything(DB_PATH)
+                app.logger.info("auto-sync complete")
+            except Exception as e:
+                app.logger.warning("auto-sync failed: %s", e)
+
+    threading.Thread(target=loop, daemon=True, name="autosync").start()
+    app.logger.info("auto-sync enabled: every %d min", minutes)
 
 
 init_db()
 seed_db()
+start_autosync()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)

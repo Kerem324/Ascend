@@ -59,6 +59,39 @@ Re-syncing updates existing posts in place (deduped by the platform's post id).
 
 See `.env.example` for where to get each credential.
 
+**3 · Go fully live** (your real channels + competitors)
+
+Copy `channels.example.json` → `channels.json` and list your brand + the
+competitors you track, with their platform ids:
+
+```json
+{
+  "own":         {"name":"Your Brand","yt_channel_id":"UC…","ig_username":"you"},
+  "competitors": [{"name":"Rival","yt_channel_id":"UC…","ig_username":"rival"}]
+}
+```
+
+When `channels.json` exists the app runs in **live mode**: no demo data — every
+number is filled by sync. (Delete `data.db` after editing so it re-seeds.)
+Competitor data uses **public** APIs only:
+
+- **YouTube** — any public channel's views/likes/comments (just the API key).
+- **Instagram** — public posts via **Business Discovery** (uses *your* token):
+  followers, likes, comments (views aren't exposed for other accounts → 0).
+- **TikTok** — no public competitor API, so TikTok competitors stay manual.
+
+## Automation — set it and forget it
+
+Sync on a schedule instead of clicking the button:
+
+```bash
+SYNC_INTERVAL_MINUTES=60   # full sync (you + competitors) every hour; 0 = off
+```
+
+A background scheduler then refreshes everything on that cadence; the sidebar
+shows **"Auto-sync every N min · last …"**. Run a single web worker
+(`gunicorn app:app` defaults to 1) so only one scheduler is active.
+
 **Real retention (YouTube).** Average-view-% comes from the YouTube *Analytics*
 API, which needs an OAuth token (not just the API key). Set it up once:
 

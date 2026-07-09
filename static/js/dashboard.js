@@ -315,13 +315,18 @@ syncBtn.addEventListener("click", async () => {
     const d = await (await fetch("/api/sync", { method: "POST" })).json();
     if (d.error) { syncStatus.textContent = "⚠ " + d.error; }
     else {
-      const ok = d.results.filter((r) => r.status === "ok");
+      const own = d.own || [], comp = d.competitors || [];
+      const ok = [...own, ...comp].filter((r) => r.status === "ok");
       const total = ok.reduce((n, r) => n + (r.synced || 0), 0);
       if (ok.length) {
-        const yt = ok.find((r) => r.retention === "youtube analytics");
-        syncStatus.textContent = `✓ ${total} posts from ${ok.map((r) => r.platform).join(", ")}`
-          + (yt ? " · retention ✓" : "");
+        const compCount = comp.filter((r) => r.status === "ok").reduce((n, r) => n + (r.synced || 0), 0);
+        const yt = own.find((r) => r.retention === "youtube analytics");
+        let msg = `✓ ${total} posts synced`;
+        if (compCount) msg += " (incl. competitors)";
+        if (yt) msg += " · retention ✓";
+        syncStatus.textContent = msg;
         load();
+        refreshMeta();
       } else {
         syncStatus.innerHTML = "No platforms connected. See <b>.env.example</b>.";
       }
@@ -333,5 +338,22 @@ syncBtn.addEventListener("click", async () => {
   setTimeout(() => { syncStatus.textContent = ""; }, 9000);
 });
 
+function agoShort(iso) {
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+async function refreshMeta() {
+  try {
+    const m = await (await fetch("/api/meta")).json();
+    const parts = [m.autoSyncMinutes > 0 ? `Auto-sync every ${m.autoSyncMinutes} min` : "Auto-sync off"];
+    if (m.lastSync) parts.push("last " + agoShort(m.lastSync));
+    document.getElementById("syncMeta").textContent = parts.join(" · ");
+  } catch (e) { /* ignore */ }
+}
+
 /* ---------- Boot ---------- */
 load();
+refreshMeta();
