@@ -470,6 +470,21 @@ def api_add_post():
     return jsonify({"ok": True})
 
 
+@app.route("/api/ideas")
+def api_ideas():
+    """New video ideas mined from your best hooks + what blew up on competitors."""
+    import ideas as ideas_mod
+    days = int(request.args.get("days", 90))
+    use_ai = request.args.get("ai", "1") != "0"
+    seed = request.args.get("seed")
+    try:
+        result = ideas_mod.get_ideas(DB_PATH, days=max(days, 60),
+                                     seed=seed, use_ai=use_ai)
+    except Exception as e:
+        return jsonify({"ideas": [], "error": str(e), "engine": "none"}), 200
+    return jsonify(result)
+
+
 @app.route("/api/sync", methods=["POST"])
 def api_sync():
     """Pull live numbers for your own channels AND tracked competitors, from

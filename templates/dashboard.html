@@ -13,17 +13,19 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">📈</div>
+        <div class="brand-mark">◆</div>
         <div>
-          <div class="brand-name">Creator Dashboard</div>
-          <div class="brand-sub">Personal brand analytics</div>
+          <div class="brand-name">JARVIS</div>
+          <div class="brand-sub">Creator Command</div>
         </div>
       </div>
       <nav class="nav">
         <button class="nav-item active" data-view="overview"><span>◧</span> Overview</button>
         <button class="nav-item" data-view="content"><span>▤</span> My Content</button>
         <button class="nav-item" data-view="hooks"><span>⚗</span> Hook Lab</button>
-        <button class="nav-item" data-view="competitors"><span>👁</span> Competitors</button>
+        <button class="nav-item" data-view="ideas"><span>✦</span> Idea Engine</button>
+        <button class="nav-item" data-view="thumbnails"><span>▧</span> Thumbnail Studio</button>
+        <button class="nav-item" data-view="competitors"><span>◎</span> Competitors</button>
       </nav>
       <div class="sidebar-foot">
         <button id="syncBtn" class="btn-ghost">⟳ Sync now</button>
@@ -122,6 +124,52 @@
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- IDEA ENGINE -->
+      <section class="view hidden" id="view-ideas">
+        <div class="ideas-head">
+          <p class="section-note">Fresh video ideas, generated from your best-performing hooks and the
+            posts that <strong>blew up</strong> on competitor channels. <span id="engineBadgeWrap"></span></p>
+          <button id="regenBtn" class="btn-primary">✦ Generate new ideas</button>
+        </div>
+        <div class="idea-grid" id="ideaGrid"></div>
+      </section>
+
+      <!-- THUMBNAIL STUDIO -->
+      <section class="view hidden" id="view-thumbnails">
+        <p class="section-note">Design a 1280×720 thumbnail — bold text, presets, live preview.
+          Export a ready-to-upload PNG. Fill a title from any idea in the Idea Engine.</p>
+        <div class="studio">
+          <div class="studio-controls">
+            <label>Headline
+              <textarea id="tTitle" maxlength="60">HOW I EDIT MY SHORTS</textarea>
+            </label>
+            <label>Sub-text
+              <input type="text" id="tSub" maxlength="40" value="in 10 minutes">
+            </label>
+            <label>Background
+              <div class="swatch-row" id="bgSwatches"></div>
+            </label>
+            <label>Text color
+              <div class="swatch-row" id="fgSwatches"></div>
+            </label>
+            <label>Layout
+              <select id="tAlign">
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+              </select>
+            </label>
+            <label>Badge (optional)
+              <input type="text" id="tBadge" maxlength="10" placeholder="NEW">
+            </label>
+            <button id="dlThumb" class="btn-primary">⬇ Download PNG</button>
+            <p class="hint">1280×720 · exports as PNG</p>
+          </div>
+          <div class="stage">
+            <div class="thumb-frame"><canvas id="thumbCanvas" width="1280" height="720"></canvas></div>
           </div>
         </div>
       </section>

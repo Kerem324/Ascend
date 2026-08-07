@@ -23,6 +23,8 @@ const VIEW_META = {
   overview: ["Overview", "Everything your brand posted, at a glance."],
   content: ["My Content", "Your latest shorts, reels and videos — and how they performed."],
   hooks: ["Hook Lab", "Compare hooks and platforms to find what actually lands."],
+  ideas: ["Idea Engine", "New video ideas mined from your data and what blew up."],
+  thumbnails: ["Thumbnail Studio", "Design and export scroll-stopping thumbnails."],
   competitors: ["Competitors", "Track concurrent channels and reverse-engineer what blew up."],
 };
 
@@ -61,6 +63,8 @@ function load() {
   if (CURRENT === "overview") loadOverview();
   else if (CURRENT === "content") loadContent();
   else if (CURRENT === "hooks") loadHooks();
+  else if (CURRENT === "ideas") loadIdeas();
+  else if (CURRENT === "thumbnails") drawThumb();
   else if (CURRENT === "competitors") loadCompetitors();
 }
 
@@ -305,6 +309,158 @@ document.getElementById("addForm").addEventListener("submit", async (e) => {
   load();
 });
 
+/* ---------- IDEA ENGINE ---------- */
+let ideaSeed = 0;
+async function loadIdeas() {
+  const grid = document.getElementById("ideaGrid");
+  grid.innerHTML = `<div class="muted" style="padding:20px">Generating ideas…</div>`;
+  const d = await (await fetch(`/api/ideas?seed=${ideaSeed}`)).json();
+  const badge = d.engine === "claude"
+    ? `<span class="engine-badge">✦ Claude-generated</span>`
+    : `<span class="engine-badge">◆ data-driven</span>`;
+  document.getElementById("engineBadgeWrap").innerHTML = badge;
+  if (!d.ideas || !d.ideas.length) {
+    grid.innerHTML = `<div class="muted" style="padding:20px">No ideas yet — add some content or sync your channels.</div>`;
+    return;
+  }
+  grid.innerHTML = d.ideas.map((i, idx) => `
+    <div class="idea-card">
+      <div class="idea-top">
+        <div>
+          <span class="tag" style="background:${platColor(i.platform)}">${i.platformLabel}</span>
+          <div class="idea-title" style="margin-top:8px">${i.title}</div>
+        </div>
+        <div class="score-ring" style="--p:${i.score}"><i>${i.score}</i></div>
+      </div>
+      <div class="idea-hook">“${i.hook}”</div>
+      <div class="idea-rationale">${i.rationale}</div>
+      <div class="idea-meta">
+        <span class="idea-fmt">${i.format}</span>
+        <button class="chip" data-idea="${idx}" style="margin-left:auto">Make thumbnail →</button>
+      </div>
+    </div>`).join("");
+  grid.querySelectorAll("[data-idea]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const i = d.ideas[+b.dataset.idea];
+      document.getElementById("tTitle").value = i.title.toUpperCase();
+      document.getElementById("tSub").value = i.hook.length > 40 ? i.hook.slice(0, 40) : i.hook;
+      switchView("thumbnails");
+    }));
+}
+document.getElementById("regenBtn").addEventListener("click", () => { ideaSeed++; loadIdeas(); });
+
+/* ---------- THUMBNAIL STUDIO ---------- */
+const BG_PRESETS = [
+  ["#0b0d12", "#1b2430"], ["#e34948", "#7a1f1f"], ["#4a3aa7", "#1b1140"],
+  ["#199e70", "#0c3a2a"], ["#eda100", "#7a4d00"], ["#111111", "#111111"], ["#f4f4f4", "#dcdcdc"],
+];
+const FG_PRESETS = ["#ffffff", "#050507", "#37e5ff", "#ffd34d", "#ff5c5c"];
+let thumbState = { bg: 0, fg: 0, align: "left" };
+
+function buildSwatches() {
+  const bg = document.getElementById("bgSwatches");
+  const fg = document.getElementById("fgSwatches");
+  if (bg.dataset.built) return;
+  BG_PRESETS.forEach((g, i) => {
+    const s = document.createElement("div");
+    s.className = "swatch" + (i === 0 ? " active" : "");
+    s.style.background = `linear-gradient(135deg, ${g[0]}, ${g[1]})`;
+    s.addEventListener("click", () => { thumbState.bg = i; markActive(bg, s); drawThumb(); });
+    bg.appendChild(s);
+  });
+  FG_PRESETS.forEach((c, i) => {
+    const s = document.createElement("div");
+    s.className = "swatch" + (i === 0 ? " active" : "");
+    s.style.background = c;
+    s.addEventListener("click", () => { thumbState.fg = i; markActive(fg, s); drawThumb(); });
+    fg.appendChild(s);
+  });
+  bg.dataset.built = fg.dataset.built = "1";
+}
+function markActive(row, el) {
+  row.querySelectorAll(".swatch").forEach((x) => x.classList.remove("active"));
+  el.classList.add("active");
+}
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function drawThumb() {
+  const canvas = document.getElementById("thumbCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = 1280, H = 720;
+  const [c1, c2] = BG_PRESETS[thumbState.bg];
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, c1); g.addColorStop(1, c2);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // subtle vignette
+  const vg = ctx.createRadialGradient(W / 2, H / 2, H / 3, W / 2, H / 2, W);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.35)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+
+  const fg = FG_PRESETS[thumbState.fg];
+  const align = document.getElementById("tAlign").value;
+  const pad = 80;
+  const maxW = W - pad * 2;
+  const title = (document.getElementById("tTitle").value || "").toUpperCase();
+  const sub = document.getElementById("tSub").value || "";
+  const badge = document.getElementById("tBadge").value || "";
+
+  ctx.textAlign = align === "center" ? "center" : "left";
+  const x = align === "center" ? W / 2 : pad;
+
+  // Title (auto-size to fit up to 3 lines)
+  let size = 118;
+  let lines;
+  do {
+    ctx.font = `800 ${size}px ${getComputedStyle(document.body).fontFamily}`;
+    lines = wrapText(ctx, title, maxW);
+    size -= 6;
+  } while (lines.length > 3 && size > 48);
+  const lineH = size * 1.05;
+  const subH = sub ? 64 : 0;
+  let y = H / 2 - ((lines.length * lineH) + subH) / 2 + size;
+
+  ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4;
+  ctx.fillStyle = fg;
+  lines.forEach((ln) => { ctx.fillText(ln, x, y); y += lineH; });
+  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+  if (sub) {
+    ctx.font = `600 46px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.fillStyle = "#37e5ff";
+    ctx.fillText(sub, x, y + 14);
+  }
+  if (badge) {
+    ctx.save();
+    ctx.textAlign = "center";
+    const bw = 150, bh = 66, bx = W - bw - 46, by = 46;
+    ctx.fillStyle = "#ff3b3b";
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 14); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = `800 34px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.fillText(badge.toUpperCase(), bx + bw / 2, by + 46);
+    ctx.restore();
+  }
+}
+["tTitle", "tSub", "tBadge", "tAlign"].forEach((id) =>
+  document.getElementById(id).addEventListener("input", drawThumb));
+document.getElementById("dlThumb").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.download = "thumbnail.png";
+  a.href = document.getElementById("thumbCanvas").toDataURL("image/png");
+  a.click();
+});
+
 /* ---------- Live sync ---------- */
 const syncBtn = document.getElementById("syncBtn");
 const syncStatus = document.getElementById("syncStatus");
@@ -355,5 +511,6 @@ async function refreshMeta() {
 }
 
 /* ---------- Boot ---------- */
+buildSwatches();
 load();
 refreshMeta();

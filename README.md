@@ -11,9 +11,11 @@ which hooks land, and what your competitors are doing — all in one place.
 | **Overview** | KPI tiles (views, followers, avg engagement, top post), a views-over-time trend, a views-by-platform breakdown, and your top-performing posts. |
 | **My Content** | Every short / reel / video you posted in the window, with views, engagement rate and retention. Filter by platform. |
 | **Hook Lab** | The "hook aim" tool — compares average performance **across platforms** and ranks your **opening hooks** by avg views, engagement and retention. |
+| **Idea Engine** | Generates fresh video ideas by mining your best hooks + what **blew up** on competitors. Each idea has a predicted-reach score and a data-grounded rationale. Zero-key data-driven by default; sharper with an Anthropic API key. |
+| **Thumbnail Studio** | An in-browser 1280×720 thumbnail designer — bold auto-sizing text, background/color presets, a badge, live preview, one-click **PNG export**. "Make thumbnail →" on any idea pre-fills it. |
 | **Competitors** | Your *concurrent channels*: their recent posts, what **blew up** (≥ 2.5× that channel's median views), and the hooks behind their breakout content. |
 
-Pick a **7 / 30 / 90-day** window in the top-right; toggle **light/dark** in the sidebar.
+Modern **"Jarvis"** black/white HUD design. Pick a **7 / 30 / 90-day** window in the top-right; toggle **light/dark** in the sidebar.
 
 ## Run it
 
