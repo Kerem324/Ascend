@@ -48,6 +48,9 @@ def close_db(exc):
 
 
 def init_db():
+    # Allow DB_PATH to live on a mounted volume (e.g. Railway /data) — create it.
+    parent = os.path.dirname(os.path.abspath(DB_PATH))
+    os.makedirs(parent, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.executescript(
         """
@@ -284,6 +287,15 @@ def _posts_within(db, channel_ids, days):
 @app.route("/")
 def home():
     return render_template("dashboard.html", platforms=PLATFORMS)
+
+
+@app.route("/sw.js")
+def service_worker():
+    # Served from the root so the worker can control the whole app scope ("/").
+    resp = app.send_static_file("sw.js")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 # ---------------------------------------------------------------------------

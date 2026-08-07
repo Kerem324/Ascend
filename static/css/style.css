@@ -77,6 +77,14 @@ h2 { font-size: 14px; margin: 0; font-weight: 650; }
   color: var(--muted); line-height: 1.5; min-height: 1em; padding: 0 2px; }
 
 .main { padding: 22px 26px 60px; max-width: 1240px; }
+/* iPhone notch / home-indicator safe areas (standalone PWA) */
+@supports (padding: max(0px)) {
+  .sidebar { padding-top: max(20px, env(safe-area-inset-top));
+    padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  .main { padding-top: max(22px, env(safe-area-inset-top));
+    padding-left: max(26px, env(safe-area-inset-left));
+    padding-right: max(26px, env(safe-area-inset-right)); }
+}
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; gap: 16px; }
 .topbar p { margin: 5px 0 0; }
 .range { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--border);

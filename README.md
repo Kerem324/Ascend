@@ -29,6 +29,13 @@ gunicorn app:app
 The app ships with realistic **demo data** (deterministic seed) so it works
 immediately. Delete `data.db` to reseed.
 
+## Deploy & install on your phone
+
+See **[DEPLOY.md](DEPLOY.md)** for a copy-paste Railway checklist. It's a
+**PWA** — open the deployed URL in Safari → *Add to Home Screen* and it installs
+as a full-screen app with its own icon (works offline for the last-loaded data).
+Point `DB_PATH` at a Railway **Volume** to keep your data across redeploys.
+
 ## Use your own numbers
 
 **1 · Manually**
